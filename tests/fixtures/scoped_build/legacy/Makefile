@@ -1,0 +1,1 @@
+CFLAGS += -DUSE_SECURE_ELEMENT=0 -I../shared

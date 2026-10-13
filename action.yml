@@ -1,0 +1,84 @@
+name: entropy-guard
+description: >-
+  Catch entropy-path bugs before they ship: build guards that check whether an
+  RNG flag exists instead of whether it is enabled (the Coldcard 2026 class),
+  and non-cryptographic PRNGs feeding keys, seeds or mnemonics.
+author: Patrick (paddy1878)
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  path:
+    description: Directory to scan.
+    default: "."
+  fail-on:
+    description: Lowest severity that fails the job (error, warning, note, never).
+    default: error
+  min-severity:
+    description: Lowest severity to report (error, warning, note).
+    default: warning
+  exclude:
+    description: Newline-separated globs to skip (e.g. vendor/*).
+    default: ""
+  sarif-file:
+    description: Where to write SARIF. Leave empty to skip.
+    default: entropy-guard.sarif
+  upload-sarif:
+    description: Upload SARIF to GitHub code scanning (needs security-events write).
+    default: "false"
+  smoke-cmd:
+    description: >-
+      Optional. A command that prints one freshly generated seed or key per run
+      (hex or BIP39 words). It is run smoke-runs times and the outputs are
+      checked for repeats and bias.
+    default: ""
+  smoke-runs:
+    description: Number of runs for the smoke test.
+    default: "200"
+
+outputs:
+  findings:
+    description: Number of reported findings.
+    value: ${{ steps.scan.outputs.findings }}
+
+runs:
+  using: composite
+  steps:
+    - name: Static scan
+      id: scan
+      shell: bash
+      env:
+        EG_PATH: ${{ inputs.path }}
+        EG_FAIL_ON: ${{ inputs.fail-on }}
+        EG_MIN: ${{ inputs.min-severity }}
+        EG_EXCLUDE: ${{ inputs.exclude }}
+        EG_SARIF: ${{ inputs.sarif-file }}
+      run: |
+        set -o pipefail
+        args=(scan "$EG_PATH" --format github --fail-on never --min-severity "$EG_MIN")
+        while IFS= read -r g; do if [ -n "$g" ]; then args+=(--exclude "$g"); fi; done <<< "$EG_EXCLUDE"
+        if [ -n "$EG_SARIF" ]; then args+=(--sarif "$EG_SARIF"); fi
+        PYTHONPATH="$GITHUB_ACTION_PATH" python3 -m entropy_guard "${args[@]}" | tee "$RUNNER_TEMP/eg.txt"
+        n=$(grep -c '^::\(error\|warning\|notice\) ' "$RUNNER_TEMP/eg.txt" || true)
+        echo "findings=$n" >> "$GITHUB_OUTPUT"
+        # second pass decides the exit code without re-printing annotations
+        fargs=(scan "$EG_PATH" --format json --fail-on "$EG_FAIL_ON" --min-severity "$EG_MIN" -o /dev/null)
+        while IFS= read -r g; do if [ -n "$g" ]; then fargs+=(--exclude "$g"); fi; done <<< "$EG_EXCLUDE"
+        PYTHONPATH="$GITHUB_ACTION_PATH" python3 -m entropy_guard "${fargs[@]}"
+
+    - name: Upload SARIF
+      if: always() && inputs.upload-sarif == 'true' && inputs.sarif-file != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+        category: entropy-guard
+
+    - name: Entropy smoke test
+      if: inputs.smoke-cmd != ''
+      shell: bash
+      env:
+        EG_CMD: ${{ inputs.smoke-cmd }}
+        EG_RUNS: ${{ inputs.smoke-runs }}
+      run: |
+        PYTHONPATH="$GITHUB_ACTION_PATH" python3 -m entropy_guard smoke --cmd "$EG_CMD" --runs "$EG_RUNS" --shell --github

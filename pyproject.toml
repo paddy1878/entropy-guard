@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "entropy-guard"
+version = "0.1.0"
+description = "Catch entropy-path bugs (RNG build guards, weak PRNGs on key paths) before they ship."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Patrick (Paddy)" }]
+requires-python = ">=3.9"
+classifiers = ["Topic :: Security :: Cryptography", "Environment :: Console"]
+
+[project.scripts]
+entropy-guard = "entropy_guard.cli:main"
+
+[tool.setuptools]
+packages = ["entropy_guard"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

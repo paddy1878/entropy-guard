@@ -1,0 +1,46 @@
+name: ci
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest
+      - run: python -m pytest -q
+
+  dogfood:
+    # The action must fail on the Coldcard-class fixture and pass on the fix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vulnerable fixture must fail
+        id: bad
+        continue-on-error: true
+        uses: ./
+        with:
+          path: tests/fixtures/coldcard_class
+          sarif-file: ""
+      - name: Assert it failed
+        if: steps.bad.outcome != 'failure'
+        run: exit 1
+      - name: Fixed fixture must pass
+        uses: ./
+        with:
+          path: tests/fixtures/coldcard_fixed
+          sarif-file: ""
+      - name: Build fixed generator
+        run: gcc -O2 -o rng_fixed tests/fixtures/coldcard_fixed/rng.c
+      - name: Smoke test passes on fixed generator
+        uses: ./
+        with:
+          path: tests/fixtures/coldcard_fixed
+          sarif-file: ""
+          smoke-cmd: ./rng_fixed
