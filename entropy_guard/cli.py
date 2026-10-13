@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import posixpath
 import sys
 
 from . import __version__, report, scanner, smoke
@@ -9,6 +11,15 @@ from . import __version__, report, scanner, smoke
 
 def _scan(args):
     findings, files = scanner.scan(args.path, excludes=args.exclude)
+    # Report paths relative to the working directory (the repo root in CI) so
+    # GitHub annotations and SARIF locations resolve to real files.
+    if not args.relative_to_scan_root:
+        prefix = os.path.relpath(os.path.abspath(args.path), os.getcwd())
+        if prefix != "." and not prefix.startswith(".."):
+            for f in findings:
+                f.file = posixpath.join(prefix.replace(os.sep, "/"), f.file)
+                for r in f.related:
+                    r["file"] = posixpath.join(prefix.replace(os.sep, "/"), r["file"])
     findings = [f for f in findings
                 if scanner.SEVERITY_ORDER[f.severity] >= scanner.SEVERITY_ORDER[args.min_severity]]
     out = report.FORMATS[args.format](findings, files)
@@ -55,6 +66,8 @@ def main(argv=None):
     s.add_argument("--exclude", action="append", default=[], help="glob to skip (repeatable)")
     s.add_argument("--fail-on", choices=["error", "warning", "note", "never"], default="error")
     s.add_argument("--min-severity", choices=["error", "warning", "note"], default="note")
+    s.add_argument("--relative-to-scan-root", action="store_true",
+                   help="report paths relative to PATH instead of the working directory")
     s.set_defaults(func=_scan)
 
     m = sub.add_parser("smoke", help="run a seed/key generator N times and test the outputs")
